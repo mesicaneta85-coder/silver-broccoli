@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="bs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#071522">
+<title>ZEMLJA WATCH AI</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+:root{color-scheme:dark;--bg:#071522;--panel:#102536;--line:#244357;--muted:#a9bfcc;--accent:#55d6be;--warn:#ffb45e}
+*{box-sizing:border-box}body{margin:0;background:linear-gradient(160deg,#071522,#0b2637);color:#eef8fb;font:15px system-ui,Arial,sans-serif}
+header{padding:22px 18px 14px;border-bottom:1px solid var(--line)}h1{font-size:25px;margin:0 0 5px;letter-spacing:.4px}header p{margin:0;color:var(--muted)}
+main{max-width:1000px;margin:auto;padding:14px;display:grid;gap:13px}
+.panel{background:#102536ed;border:1px solid var(--line);border-radius:16px;padding:14px;box-shadow:0 8px 24px #0003}
+.top{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.status{color:var(--accent);font-weight:700}.controls{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+button,select{background:#18384c;color:#f3fbff;border:1px solid #31566d;border-radius:10px;padding:10px 12px;font-size:14px}
+button:active{transform:scale(.98)}.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.stat{background:#0b1e2c;border-radius:12px;padding:11px}.stat b{display:block;font-size:22px;color:var(--accent)}.stat small{color:var(--muted)}
+#map{height:330px;border-radius:12px;overflow:hidden;background:#0a1b28}
+h2{font-size:17px;margin:0 0 10px}.muted{color:var(--muted);font-size:13px;line-height:1.45}
+#events{display:grid;gap:8px}.event{display:flex;justify-content:space-between;gap:10px;padding:10px;background:#0b1e2c;border-radius:10px}.event strong{color:#ffd08a}.event small{display:block;color:var(--muted);margin-top:3px}
+.notice{border-left:3px solid var(--warn);padding:9px 11px;background:#2a241b;border-radius:8px;color:#ffe3bf;font-size:13px;line-height:1.45}
+footer{text-align:center;color:var(--muted);font-size:12px;padding:6px 0 22px}
+@media(max-width:520px){.stats{grid-template-columns:repeat(3,1fr)}.stat b{font-size:19px}#map{height:290px}}
+</style>
+</head>
+<body>
+<header><h1>🌍 ZEMLJA WATCH AI</h1><p>Praćenje potresa i istraživanje seizmičke aktivnosti</p></header>
+<main>
+<section class="panel">
+ <div class="top"><span class="status" id="status">● Povezivanje…</span><span class="muted" id="updated"></span></div>
+ <div class="controls">
+  <select id="period" aria-label="Period"><option value="hour">Posljednji sat</option><option value="day" selected>Posljednja 24 sata</option><option value="week">Posljednjih 7 dana</option></select>
+  <select id="minmag" aria-label="Minimalna magnituda"><option value="0">Sve magnitude</option><option value="2.5">M 2.5+</option><option value="4">M 4.0+</option><option value="5">M 5.0+</option></select>
+  <button id="refresh">Osvježi podatke</button>
+ </div>
+</section>
+<section class="stats">
+ <div class="stat"><b id="count">—</b><small>Prikazanih potresa</small></div>
+ <div class="stat"><b id="strongest">—</b><small>Najjača magnituda</small></div>
+ <div class="stat"><b id="deepest">—</b><small>Najveća dubina (km)</small></div>
+</section>
+<section class="panel"><h2>🗺️ Karta potresa</h2><div id="map"></div><p class="muted">Dodirni kružić na karti za detalje potresa.</p></section>
+<section class="panel"><h2>🔴 BLOT ECHO WATCH</h2><p class="muted">Pregled jačih potresa, dubina i naknadne seizmičke aktivnosti. Modul grupiše zabilježene događaje u blizini i vremenu; ne predviđa pouzdano buduće zemljotrese.</p><div id="analysis" class="muted">Čekam podatke…</div></section>
+<section class="panel"><h2>📡 Najnoviji potresi</h2><div id="events"><p class="muted">Učitavanje…</p></div></section>
+<section class="notice"><b>Važno:</b> Podaci su informativni i mogu kasniti. Nije moguće pouzdano predvidjeti tačno vrijeme, mjesto ili jačinu budućeg zemljotresa. U hitnim situacijama pratite zvanične službe.</section>
+<footer>Izvor podataka: USGS Earthquake Hazards Program · Za rad su potrebni internet i dozvola za učitavanje karte.</footer>
+</main>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const map=L.map('map').setView([20,0],2);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:9,attribution:'© OpenStreetMap'}).addTo(map);
+let markers=L.layerGroup().addTo(map),all=[];
+const $=id=>document.getElementById(id);
+function periodUrl(){let p=$('period').value;return p==='hour'?'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_hour.geojson':p==='week'?'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_week.geojson':'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson'}
+function when(t){return new Date(t).toLocaleString('bs-BA')}
+function render(){
+ const min=Number($('minmag').value),items=all.filter(f=>(f.properties.mag??0)>=min).sort((a,b)=>b.properties.time-a.properties.time);
+ markers.clearLayers();
+ items.forEach(f=>{let [lon,lat,depth]=f.geometry.coordinates,mag=f.properties.mag??0;
+  L.circleMarker([lat,lon],{radius:Math.max(4,Math.min(15,mag*2.2)),color:mag>=5?'#ff765e':'#55d6be',fillColor:mag>=5?'#ff765e':'#55d6be',fillOpacity:.72,weight:1})
+   .bindPopup(`<b>M ${mag.toFixed(1)}</b><br>${f.properties.place}<br>Dubina: ${depth.toFixed(1)} km<br>${when(f.properties.time)}`).addTo(markers);
+ });
+ $('count').textContent=items.length;
+ $('strongest').textContent=items.length?'M '+Math.max(...items.map(f=>f.properties.mag??0)).toFixed(1):'—';
+ $('deepest').textContent=items.length?Math.max(...items.map(f=>f.geometry.coordinates[2])).toFixed(1):'—';
+ $('events').innerHTML=items.slice(0,35).map(f=>{let p=f.properties,d=f.geometry.coordinates[2];return `<div class="event"><div><strong>M ${(p.mag??0).toFixed(1)}</strong> · ${p.place}<small>${when(p.time)} · Dubina ${d.toFixed(1)} km</small></div><div>📍</div></div>`}).join('')||'<p class="muted">Nema potresa za odabrani filter.</p>';
+ const strong=items.filter(f=>(f.properties.mag??0)>=5);
+ const deep=items.filter(f=>f.geometry.coordinates[2]>=70);
+ $('analysis').innerHTML=`U odabranom periodu zabilježeno je <b>${items.length}</b> događaja prema izabranom filteru. Jačih potresa M 5.0+ ima <b>${strong.length}</b>, a potresa na dubini od 70 km ili više <b>${deep.length}</b>.<br><br>Ovi brojevi opisuju već zabilježene događaje. Za procjenu naknadnih potresa potrebno je analizirati pojedinačni glavni potres, okolne događaje, udaljenost i vremenski slijed; sama dubina ne znači da će se novi potres sigurno dogoditi.`;
+}
+async function load(){ $('status').textContent='● Učitavanje…';try{let r=await fetch(periodUrl());if(!r.ok)throw Error('Mrežna greška');let j=await r.json();all=j.features||[];render();$('status').textContent='● Podaci učitani';$('updated').textContent='Ažurirano: '+new Date().toLocaleTimeString('bs-BA')}catch(e){$('status').textContent='● Nema veze';$('events').innerHTML='<p class="muted">Provjeri internet vezu i pokušaj ponovo.</p>'}}
+$('refresh').onclick=load;$('period').onchange=load;$('minmag').onchange=render;load();setInterval(load,5*60*1000);
+</script>
+</body></html>
